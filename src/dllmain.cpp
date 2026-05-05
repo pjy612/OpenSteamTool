@@ -8,8 +8,8 @@ bool LoadDiversion()
         return false;
     }
     sprintf_s(SteamclientPath, MAX_PATH, "%s\\steamclient64.dll",  SteamInstallPath);
-    sprintf_s(DiversionPath,   MAX_PATH, "%s\\bin\\diversion.dll", SteamInstallPath);
-    sprintf_s(LuaDir,          MAX_PATH, "%s\\config\\lua",        SteamInstallPath);
+    sprintf_s(DiversionPath,   MAX_PATH, "%s\\bin\\diversion64.dll", SteamInstallPath);
+    sprintf_s(LuaDir,          MAX_PATH, "%s\\config\\stplug-in",        SteamInstallPath);
     // copy steamclient64.dll to diversion.dll
     CopyFileA(SteamclientPath, DiversionPath, FALSE);
     diversion_hMdoule = LoadLibraryA(DiversionPath);
