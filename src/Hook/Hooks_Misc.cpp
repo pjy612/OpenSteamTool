@@ -23,7 +23,7 @@ namespace {
                 g_steamEngine = reinterpret_cast<void*>(ctx->Rcx);
                 // One-shot capture: restore the original byte permanently.
                 *reinterpret_cast<uint8_t*>(g_oGetAppIDForCurrentPipe) = 0x48;
-                LOG_INFO("Captured SteamEngine pointer: 0x{:X}",
+                LOG_MISC_INFO("Captured SteamEngine pointer: 0x{:X}",
                          reinterpret_cast<uint64_t>(g_steamEngine));
                 return EXCEPTION_CONTINUE_EXECUTION;
             }
@@ -33,7 +33,7 @@ namespace {
                 g_runningAppId = *reinterpret_cast<uint32_t*>(pAppId);
                 *g_initialRunningGameTarget = 0x48;
                 ctx->EFlags |= 0x100;  // arm TF for re-arming
-                LOG_INFO("Captured Running AppId: {} from 0x{:X}", g_runningAppId, pAppId);
+                LOG_MISC_INFO("Captured Running AppId: {} from 0x{:X}", g_runningAppId, pAppId);
                 return EXCEPTION_CONTINUE_EXECUTION;
             }
         }
@@ -84,20 +84,20 @@ namespace Hooks_Misc {
 
     AppId_t GetAppIDForCurrentPipe() {
         if (!g_steamEngine || !g_oGetAppIDForCurrentPipe) {
-            LOG_WARN("GetAppIDForCurrentPipe called before capture — returning 0");
+            LOG_MISC_WARN("GetAppIDForCurrentPipe called before capture — returning 0");
             return 0;
         }
         auto appid =  g_oGetAppIDForCurrentPipe(g_steamEngine);
-        LOG_TRACE("GetAppIDForCurrentPipe: AppId={}", appid);
+        LOG_MISC_INFO("GetAppIDForCurrentPipe: AppId={}", appid);
         return appid;
     }
 
     AppId_t GetAppIDFromInitialRunningGame() {
         if (!g_initialRunningGameTarget) {
-            LOG_WARN("GetAppIDFromInitialRunningGame called before capture — returning 0");
+            LOG_MISC_WARN("GetAppIDFromInitialRunningGame called before capture — returning 0");
             return 0;
         }
-        LOG_TRACE("GetAppIDFromInitialRunningGame: returning AppId={}", g_runningAppId);
+        LOG_MISC_INFO("GetAppIDFromInitialRunningGame: returning AppId={}", g_runningAppId);
         return g_runningAppId;
     }
 }

@@ -15,4 +15,10 @@ namespace AppTicket {
 
     //Get spoof steamID From the cached AppOwnershipTicket for the given AppId.
     uint64_t GetSpoofSteamID(AppId_t appId);
+
+    // Write AppTicket binary data to registry.
+    bool WriteAppOwnershipTicket(AppId_t appId, const std::vector<uint8_t>& data);
+
+    // Write ETicket binary data to registry.
+    bool WriteEncryptedTicket(AppId_t appId, const std::vector<uint8_t>& data);
 }

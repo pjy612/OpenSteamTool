@@ -33,7 +33,7 @@ namespace {
             const char* name = GetKeyName(depot->m_iKeyName);
             if (!name) continue;
             uint64_t depotId = strtoull(name, nullptr, 10);
-            LOG_TRACE("Found depot node: name={} depotId={}", name, depotId);
+            LOG_KEYVALUE_TRACE("Found depot node: name={} depotId={}", name, depotId);
             if (overrides.count(depotId))
                 PatchDepotNode(depot, depotId);
         }
@@ -60,7 +60,7 @@ namespace {
     const char* GetKeyName(int symbol) {
         auto* sys = GetKeyValuesSystem();
         auto name = sys->GetStringForSymbol(symbol);
-        LOG_TRACE("GetKeyName: symbol={} -> name={}", symbol, name);
+        LOG_KEYVALUE_TRACE("GetKeyName: symbol={} -> name={}", symbol, name);
         return name ? name : nullptr;
     }
 
@@ -95,7 +95,10 @@ namespace {
                 sizeNode->m_ullValue        = it->second.size;
                 sizeNode->m_pChain          = nullptr;
             }
-            LOG_INFO("Patched depot {} manifest branch '{}': gid={} size={}", depotId, GetKeyName(branch->m_iKeyName),
+            LOG_KEYVALUE_INFO("Patched depot {} manifest branch '{}': gid={} size={}", depotId, GetKeyName(branch->m_iKeyName),
+                     gidNode ? std::to_string(gidNode->m_ullValue) : "N/A",
+                     sizeNode ? std::to_string(sizeNode->m_ullValue) : "N/A");
+            LOG_MANIFEST_INFO("Patched depot {} manifest branch '{}': gid={} size={}", depotId, GetKeyName(branch->m_iKeyName),
                      gidNode ? std::to_string(gidNode->m_ullValue) : "N/A",
                      sizeNode ? std::to_string(sizeNode->m_ullValue) : "N/A");
         }

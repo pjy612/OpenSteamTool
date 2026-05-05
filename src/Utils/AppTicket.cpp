@@ -50,6 +50,11 @@ namespace AppTicket {
 
     std::vector<uint8_t> GetAppOwnershipTicketFromRegistry(AppId_t appId) {
         LOG_TRACE("AppId={}", appId);
+        // exclude those appids that are not in addappid
+        if (!LuaConfig::HasDepot(appId)) {
+            LOG_DEBUG("GetAppOwnershipTicketFromRegistry for AppId {}: not in addappid, skip", appId);
+            return {};
+        }
         std::vector<uint8_t> empty{};
         HKEY hKey;
         const std::string regPath = "Software\\Valve\\Steam\\Apps\\" + std::to_string(appId);
@@ -72,9 +77,13 @@ namespace AppTicket {
         return value;
     }
 
-
     std::vector<uint8_t> GetEncryptedTicketFromRegistry(AppId_t appId) {
         LOG_DEBUG("appid={}", appId);    
+        // exclude those appids that are not in addappid
+        if (!LuaConfig::HasDepot(appId)) {
+            LOG_DEBUG("GetAppOwnershipTicketFromRegistry for AppId {}: not in addappid, skip", appId);
+            return {};
+        }
         std::vector<uint8_t> empty{};
         HKEY hKey;
         const std::string regPath = "Software\\Valve\\Steam\\Apps\\" + std::to_string(appId);
@@ -97,7 +106,50 @@ namespace AppTicket {
         return value;
     }
 
+    bool WriteAppOwnershipTicket(AppId_t appId, const std::vector<uint8_t>& data) {
+        // we can't execlude appids here 
+        HKEY hKey;
+        const std::string regPath = "Software\\Valve\\Steam\\Apps\\" + std::to_string(appId);
+        DWORD disposition;
+        if (RegCreateKeyExA(HKEY_CURRENT_USER, regPath.c_str(), 0, nullptr, 0, KEY_WRITE, nullptr, &hKey, &disposition) != ERROR_SUCCESS) {
+            LOG_ERROR("Failed to create/open registry key: {}", regPath);
+            return false;
+        }
+        LSTATUS result = RegSetValueExA(hKey, "AppTicket", 0, REG_BINARY, data.data(), static_cast<DWORD>(data.size()));
+        RegCloseKey(hKey);
+        if (result != ERROR_SUCCESS) {
+            LOG_ERROR("Failed to write AppTicket for AppId {}: {}", appId, result);
+            return false;
+        }
+        LOG_INFO("Wrote AppTicket for AppId {} ({} bytes)", appId, data.size());
+        return true;
+    }
+
+    bool WriteEncryptedTicket(AppId_t appId, const std::vector<uint8_t>& data) {
+        // we can't execlude appids here 
+        HKEY hKey;
+        const std::string regPath = "Software\\Valve\\Steam\\Apps\\" + std::to_string(appId);
+        DWORD disposition;
+        if (RegCreateKeyExA(HKEY_CURRENT_USER, regPath.c_str(), 0, nullptr, 0, KEY_WRITE, nullptr, &hKey, &disposition) != ERROR_SUCCESS) {
+            LOG_ERROR("Failed to create/open registry key: {}", regPath);
+            return false;
+        }
+        LSTATUS result = RegSetValueExA(hKey, "ETicket", 0, REG_BINARY, data.data(), static_cast<DWORD>(data.size()));
+        RegCloseKey(hKey);
+        if (result != ERROR_SUCCESS) {
+            LOG_ERROR("Failed to write ETicket for AppId {}: {}", appId, result);
+            return false;
+        }
+        LOG_INFO("Wrote ETicket for AppId {} ({} bytes)", appId, data.size());
+        return true;
+    }
+
     uint64_t GetSpoofSteamID(AppId_t appId) {
+        // exclude those appids that are not in addappid
+        if (!LuaConfig::HasDepot(appId)) {
+            LOG_DEBUG("GetSpoofSteamID for AppId {}: not in addappid, skip spoofing", appId);
+            return 0;
+        }
         const uint64_t registrySteamID = GetSteamIDFromRegistryString(appId);
         if (registrySteamID != 0) {
             return registrySteamID;

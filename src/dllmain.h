@@ -18,7 +18,7 @@
 #include "Steam/Structs.h"
 #include "Utils/LuaConfig.h"
 #include "Utils/Log.h"
-
+#include "Utils/Config.h"
 
 
 inline HMODULE diversion_hMdoule = nullptr;
@@ -26,6 +26,7 @@ inline char SteamInstallPath[MAX_PATH] = {};
 inline char SteamclientPath[MAX_PATH] = {};
 inline char DiversionPath[MAX_PATH] = {};
 inline char LuaDir[MAX_PATH] = {};
+inline char ConfigPath[MAX_PATH] = {};
 
 
 #endif // DLLMAIN_H
