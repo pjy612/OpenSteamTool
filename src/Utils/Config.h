@@ -12,7 +12,7 @@ namespace Config {
     void Load(const std::string& configPath);
 
     // [manifest]
-    inline ManifestUrl manifestUrl = ManifestUrl::SteamRun;
+    inline ManifestUrl manifestUrl = ManifestUrl::Wudrm;
     inline DWORD manifestTimeoutResolve = 5000;
     inline DWORD manifestTimeoutConnect = 5000;
     inline DWORD manifestTimeoutSend    = 10000;

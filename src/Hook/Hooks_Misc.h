@@ -19,4 +19,8 @@ namespace Hooks_Misc {
     // Available earlier in the Steam startup sequence than
     // GetAppIDForCurrentPipe.
     AppId_t GetAppIDFromInitialRunningGame();
+
+    // Grow a CUtlBuffer to at least 'size' bytes and set m_Put = size.
+    // Uses CUtlBuffer::EnsureCapacity from steamclient, resolved on first call.
+    void EnsureBufferSize(CUtlBuffer* pWrite, int32 size);
 }

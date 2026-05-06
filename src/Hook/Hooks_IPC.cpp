@@ -1,5 +1,6 @@
 #include "Hooks_IPC.h"
 #include "Hooks_IPC_ISteamUser.h"
+#include "Hooks_IPC_ISteamUtils.h"
 #include "HookMacros.h"
 #include "dllmain.h"
 #include "Utils/Hash.h"
@@ -135,12 +136,12 @@ namespace {
             if (cmd == EIPCCommand::InterfaceCall) {
                 const auto iface = static_cast<EIPCInterface>(reqData[OFFSET_INTERFACE_ID]);
                 const uint32 funcHash = *reinterpret_cast<const uint32*>(reqData + OFFSET_FUNC_HASH);
-                LOG_IPC_DEBUG("IPC {}::0x{:08X}  pipe=0x{:08X} pid={} proc={}",
+                LOG_IPC_TRACE("IPC {}::0x{:08X}  pipe=0x{:08X} pid={} proc={}",
                             EIPCInterfaceName(iface), funcHash,
                             hSteamPipe, clientPID, procName ? procName : "?");
             } 
             else {
-                LOG_IPC_DEBUG("IPC {}  pipe=0x{:08X} pid={} proc={}",
+                LOG_IPC_TRACE("IPC {}  pipe=0x{:08X} pid={} proc={}",
                             EIPCCommandName(cmd), hSteamPipe, clientPID,
                             procName ? procName : "?");
             }
@@ -183,7 +184,7 @@ namespace Hooks_IPC {
 
         // Interface modules register their handlers here.
         Hooks_IPC_ISteamUser::Register();
-        // Hooks_IPC_ISteamUtils::Register();  // future
+        Hooks_IPC_ISteamUtils::Register();
 
         HOOK_BEGIN();
         INSTALL_HOOK_D(IPCProcessMessage);

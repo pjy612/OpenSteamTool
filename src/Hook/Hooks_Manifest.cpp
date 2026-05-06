@@ -3,22 +3,87 @@
 #include "dllmain.h"
 #include "Utils/WinHttp.h"
 #include <charconv>
+#include <format>
+#include <mutex>
 
 // ═══════════════════════════════════════════════════════════════════
-//  Manifest request-code resolution.
-//  Codes rotate over time — cannot be cached.
+//  Manifest override hooks:
+//    BuildDepotDependency — patches depot entries' gid/size directly
+//      in the output vector (replaces the old KV-tree approach).
 //
-//  For games with many DLCs (150+), Steam calls GetManifestRequestCode
-//  serially for every depot.  We keep a persistent WinHTTP session +
-//  connection so that repeated requests to the same manifest provider
-//  skip DNS / TCP / TLS setup after the first call.
+//    GetManifestRequestCode — migrated to Hooks_NetPacket_Manifest
+//      (NetPacket layer, async HTTP via ContentServerDirectory#1).
 // ═══════════════════════════════════════════════════════════════════
 namespace {
 
-    // ── persistent connection state ───────────────────────────────
-    HINTERNET g_hSession = nullptr;
-    HINTERNET g_hConnect = nullptr;
-    bool      g_tls      = false;
+    // ── helper ─────────────────────────────────────────────────────
+
+    std::string DepotEntryDebug(const DepotEntry& e) {
+        return std::format("DepotId={} AppId={} Gid={} Size={} Dlc={} Lcs={} Carry={} Shared={}",
+            e.DepotId, e.AppId, e.ManifestGid, e.ManifestSize, e.DlcAppId,
+            (int)e.LcsRequired, (int)e.bNotNewTarget, (int)e.SharedInstall);
+    }
+
+    // ── BuildDepotDependency hook ──────────────────────────────────
+    // After Steam builds the depot list for an app, patch ManifestGid
+    // and ManifestSize for any depots we have overrides for.
+
+    HOOK_FUNC(BuildDepotDependency, bool, void* pUserAppMgr, AppId_t AppId,
+              void* pUserConfig, CUtlVector<DepotEntry>* pDepotInfo,
+              CUtlVector<DepotEntry>* pSharedDepotInfo, void* pSteamApp,
+              uint32* pBuildId, bool* pbBetaFallback)
+    {
+        bool result = oBuildDepotDependency(pUserAppMgr, AppId, pUserConfig,
+            pDepotInfo, pSharedDepotInfo, pSteamApp, pBuildId, pbBetaFallback);
+
+        LOG_MANIFEST_TRACE("BuildDepotDependency: AppId={} pUserConfig=0x{:X} result={} pSteamApp=0x{:X} pBuildId={} pbBetaFallback={}",
+            AppId, (uintptr_t)pUserConfig, result, (uintptr_t)pSteamApp,
+            pBuildId ? *pBuildId : 0, pbBetaFallback ? *pbBetaFallback : false);
+        if (pDepotInfo) {
+            LOG_MANIFEST_TRACE("pDepotInfo->nCount={}", pDepotInfo->m_Size);
+            for (uint32 i = 0; i < pDepotInfo->m_Size; ++i) {
+                LOG_MANIFEST_TRACE("  [{}] {}", i, DepotEntryDebug(pDepotInfo->m_Memory.m_pMemory[i]));
+            }
+        }
+        if (pSharedDepotInfo) {
+            LOG_MANIFEST_TRACE("pSharedDepotInfo->nCount={}", pSharedDepotInfo->m_Size);
+            for (uint32 i = 0; i < pSharedDepotInfo->m_Size; ++i) {
+                LOG_MANIFEST_TRACE("  shared[{}] {}", i, DepotEntryDebug(pSharedDepotInfo->m_Memory.m_pMemory[i]));
+            }
+        }
+
+        if (!result) return result;
+
+        const auto& overrides = LuaConfig::GetManifestOverrides();
+        if (overrides.empty()) return result;
+
+        if (pDepotInfo && pDepotInfo->m_Size) {
+            for (uint32 i = 0; i < pDepotInfo->m_Size; ++i) {
+                DepotEntry& e = pDepotInfo->m_Memory.m_pMemory[i];
+                auto it = overrides.find(e.DepotId);
+                if (it != overrides.end()) {
+                    LOG_MANIFEST_INFO("BuildDepotDependency: patching depot {} gid={}->{} size={}->{}",
+                        e.DepotId, e.ManifestGid, it->second.gid,
+                        e.ManifestSize, it->second.size);
+                    e.ManifestGid  = it->second.gid;
+                    e.ManifestSize = it->second.size;
+                }
+            }
+        }
+        return result;
+    }
+
+} // anonymous namespace
+
+// ═══════════════════════════════════════════════════════════════════
+//  Manifest HTTP providers (thread-safe via g_ConnectionMutex)
+// ═══════════════════════════════════════════════════════════════════
+namespace Hooks_Manifest {
+
+    std::mutex  g_ConnectionMutex;
+    HINTERNET   g_hSession = nullptr;
+    HINTERNET   g_hConnect = nullptr;
+    bool        g_tls      = false;
 
     void EnsureConnection(const wchar_t* host, INTERNET_PORT port, bool tls) {
         // Already connected to the right host — reuse
@@ -68,7 +133,7 @@ namespace {
 
     // GET https://manifest.steam.run/api/manifest/{gid}
     // Response: {"content":"1666836470726104466"}
-    bool FetchSteamRun(uint64 manifest_gid, uint64* outRequestCode) {
+    bool FetchSteamRun(uint64_t manifest_gid, uint64_t* outRequestCode) {
         EnsureConnection(L"manifest.steam.run", INTERNET_DEFAULT_HTTPS_PORT, true);
         if (!g_hConnect) return false;
 
@@ -86,7 +151,7 @@ namespace {
         if (size_t key = r.body.find("\"content\""); key != std::string::npos) {
             if (size_t q1 = r.body.find('"', key + 9); q1 != std::string::npos) {
                 if (size_t q2 = r.body.find('"', q1 + 1); q2 != std::string::npos) {
-                    uint64 code = 0;
+                    uint64_t code = 0;
                     auto [_, ec] = std::from_chars(
                         r.body.data() + q1 + 1, r.body.data() + q2, code);
                     if (ec == std::errc{}) {
@@ -101,8 +166,8 @@ namespace {
 
     // ── provider: gmrc.wudrm.com ───────────────────────────────────
     // GET http://gmrc.wudrm.com/manifest/{gid}
-    // Response: plain-text uint64, e.g. "10570517747114638659"
-    bool FetchWudrm(uint64 manifest_gid, uint64* outRequestCode) {
+    // Response: plain-text uint64_t, e.g. "10570517747114638659"
+    bool FetchWudrm(uint64_t manifest_gid, uint64_t* outRequestCode) {
         EnsureConnection(L"gmrc.wudrm.com", INTERNET_DEFAULT_HTTP_PORT, false);
         if (!g_hConnect) return false;
 
@@ -117,7 +182,7 @@ namespace {
 
         if (!r.ok || r.status != 200) return false;
 
-        uint64 code = 0;
+        uint64_t code = 0;
         auto [_, ec] = std::from_chars(r.body.data(), r.body.data() + r.body.size(), code);
         if (ec == std::errc{}) {
             *outRequestCode = code;
@@ -127,45 +192,39 @@ namespace {
     }
 
     // ── resolve (single-provider, no fallback) ────────────────────
-    bool FetchManifestRequestCode(uint64 manifest_gid, uint64* outRequestCode) {
+    bool FetchManifestRequestCode(uint64_t manifestGid, uint64_t* outRequestCode) {
+        std::lock_guard<std::mutex> lock(g_ConnectionMutex);
+
         if (LuaConfig::HasManifestCodeFunc()) {
-            if (LuaConfig::CallManifestFetchCode(manifest_gid, outRequestCode)) {
-                LOG_MANIFEST_INFO("Manifest gid={} resolved via manifest.lua", manifest_gid);
+            if (LuaConfig::CallManifestFetchCode(manifestGid, outRequestCode)) {
+                LOG_MANIFEST_INFO("Manifest gid={} resolved via manifest.lua", manifestGid);
                 return true;
             }
-            LOG_MANIFEST_WARN("Manifest gid={} lua returned nil, falling back to config", manifest_gid);
+            LOG_MANIFEST_WARN("Manifest gid={} lua returned nil, falling back to config", manifestGid);
         }
 
         switch (Config::manifestUrl) {
         case Config::ManifestUrl::Wudrm:
-            return FetchWudrm(manifest_gid, outRequestCode);
+            return FetchWudrm(manifestGid, outRequestCode);
         case Config::ManifestUrl::SteamRun:
         default:
-            return FetchSteamRun(manifest_gid, outRequestCode);
+            return FetchSteamRun(manifestGid, outRequestCode);
         }
     }
 
-    HOOK_FUNC(GetManifestRequestCode, EResult, void* pObject, AppId_t AppId, AppId_t DepotId,
-              uint64 manifest_gid, const char* branch, uint64* outRequestCode) {
-        LOG_MANIFEST_DEBUG("GetManifestRequestCode: AppId={} DepotId={} gid={} branch={}",
-                          AppId, DepotId, manifest_gid, branch);
-        if (LuaConfig::HasDepot(DepotId)
-            && FetchManifestRequestCode(manifest_gid, outRequestCode))
-            return k_EResultOK;
-        return oGetManifestRequestCode(pObject, AppId, DepotId, manifest_gid, branch, outRequestCode);
-    }
-}
+    // ═══════════════════════════════════════════════════════════════
+    //  Install / Uninstall
+    // ═══════════════════════════════════════════════════════════════
 
-namespace Hooks_Manifest {
     void Install() {
         HOOK_BEGIN();
-        INSTALL_HOOK_D(GetManifestRequestCode);
+        INSTALL_HOOK_D(BuildDepotDependency);
         HOOK_END();
     }
 
     void Uninstall() {
         UNHOOK_BEGIN();
-        UNINSTALL_HOOK(GetManifestRequestCode);
+        UNINSTALL_HOOK(BuildDepotDependency);
         UNHOOK_END();
         CloseConnection();
     }

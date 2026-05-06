@@ -5,8 +5,10 @@
 
 namespace {
     using GetAppIDForCurrentPipe_t = AppId_t(*)(void* pSteamEngine);
-
+    using CUtlBufferEnsureCapacity_t = void*(*)(CUtlBuffer*, int);
+    
     GetAppIDForCurrentPipe_t g_oGetAppIDForCurrentPipe   = nullptr;
+    CUtlBufferEnsureCapacity_t oCUtlBufferEnsureCapacity = nullptr;
     void*                    g_steamEngine               = nullptr;
     uint8_t*                 g_initialRunningGameTarget  = nullptr;
     AppId_t                  g_runningAppId              = 0;
@@ -99,5 +101,17 @@ namespace Hooks_Misc {
         }
         LOG_MISC_INFO("GetAppIDFromInitialRunningGame: returning AppId={}", g_runningAppId);
         return g_runningAppId;
+    }
+
+    void EnsureBufferSize(CUtlBuffer* pWrite, int32 size)
+    {
+        if (!oCUtlBufferEnsureCapacity)
+            RESOLVE_D(CUtlBufferEnsureCapacity);
+        if (oCUtlBufferEnsureCapacity) {
+            LOG_MISC_DEBUG("Before ensuring CUtlBuffer capacity: {}", pWrite->DebugString());
+            oCUtlBufferEnsureCapacity(pWrite, size);
+            LOG_MISC_DEBUG("After ensuring CUtlBuffer capacity: {}", pWrite->DebugString());
+        }
+        pWrite->m_Put = size;
     }
 }

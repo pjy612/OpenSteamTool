@@ -1,9 +1,12 @@
 #pragma once
+#include "Steam/Types.h"
 
 namespace Hooks_Manifest {
-    // GetManifestRequestCode hook: serves request codes for our injected
-    // depots from manifest.steam.run, with an in-memory cache and bounded
-    // WinHTTP timeouts so a slow/dead network never stalls the host.
     void Install();
     void Uninstall();
+
+    // Fetch a manifest request code from online providers.
+    // Thread-safe — serialises access to the underlying WinHTTP connection.
+    // Returns true and sets *outRequestCode on success.
+    bool FetchManifestRequestCode(uint64 manifestGid, uint64* outRequestCode);
 }

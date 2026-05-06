@@ -8,6 +8,7 @@
 #include "Enums.h"
 
 #include <string>
+#include <format>
 
 template<typename T>
 struct CUtlMemory{
@@ -41,8 +42,11 @@ struct CUtlBuffer{
 	int32 TellGet() const     { return m_Get; }
 	// Debug helper
 	std::string DebugString() const{
-		return "m_Get:" + std::to_string(m_Get) + " , m_Put:" + std::to_string(m_Put) + " , m_nOffset:" + std::to_string(m_nOffset)+ " , m_flags:" + std::to_string(m_flags);
-	}
+      return std::format("m_Memory:0x{:X} m_AllocCnt:{} m_Grow:{} m_Get:{} m_Put:{} m_nOffset:{} m_flags:{}",
+          reinterpret_cast<uintptr_t>(m_Memory.m_pMemory),
+          m_Memory.m_nAllocationCount, m_Memory.m_nGrowSize,
+          m_Get, m_Put, m_nOffset, m_flags);
+  }
 };
 
 struct PackageInfo
@@ -85,6 +89,21 @@ struct CSteamApp{
 	AppId_t AppID;
 	// ...
 };
+
+// Single depot manifest entry (0x20 bytes) produced by BuildDepotDependency.
+struct DepotEntry
+{
+	uint32  DepotId;        // 0x00
+	uint32  AppId;          // 0x04
+	uint64  ManifestGid;    // 0x08 — from depots/<id>/manifests/<branch>/gid
+	uint64  ManifestSize;   // 0x10 — from depots/<id>/manifests/<branch>/size
+	uint32  DlcAppId;       // 0x18 — associated DLC AppID, 0 if none
+	uint8   LcsRequired;    // 0x1C — branches/<branch>/lcsrequired
+	uint8   bNotNewTarget;  // 0x1D — carried over from active list (not newly activated this call)
+	uint8   SharedInstall;  // 0x1E — sharedinstall / depotfromapp redirect
+	uint8   Padding;        // 0x1F
+};
+static_assert(sizeof(DepotEntry) == 0x20, "DepotEntry must be 32 bytes");
 
 struct KeyValues
 {

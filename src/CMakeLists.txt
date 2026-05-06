@@ -90,6 +90,7 @@ add_library(OpenSteamTool SHARED
     Hook/Hooks_Decryption.cpp
     Hook/Hooks_IPC.cpp
     Hook/Hooks_IPC_ISteamUser.cpp
+    Hook/Hooks_IPC_ISteamUtils.cpp
     Hook/Hooks_KeyValues.cpp
     Hook/Hooks_Manifest.cpp
     Hook/Hooks_Misc.cpp

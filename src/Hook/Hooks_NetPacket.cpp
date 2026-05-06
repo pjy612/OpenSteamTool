@@ -1,8 +1,11 @@
 #include "Hooks_NetPacket.h"
+#include "Hooks_Manifest.h"
 #include "HookMacros.h"
 #include "dllmain.h"
 #include "Utils/AppTicket.h"
 #include "Utils/Hash.h"
+#include <chrono>
+#include <future>
 #include <unordered_map>
 
 #include "steam_messages.pb.h"
@@ -17,7 +20,7 @@ namespace {
     constexpr uint32 kMaxPacketSize = 8 + kMaxHdrSize + kMaxBodySize;
     constexpr int    kPacketPoolSize = 8;
 
-    // ── Incoming (RecvMultiPkt) packet pool ─────────────────────
+    // ── Incoming (RecvPkt) packet pool ─────────────────────
     uint8  g_NewBody[kMaxBodySize];
     uint32 g_cbNewBody   = 0;
     uint8  g_NewHdr[kMaxHdrSize];
@@ -118,6 +121,7 @@ namespace {
     // ── Hash constants for target_job_name dispatch ─────────────
     constexpr uint32 HASH_JOB_NotifyRunningApps = Fnv1aHash("FamilyGroupsClient.NotifyRunningApps#1");
     constexpr uint32 HASH_JOB_GetUserStats = Fnv1aHash("Player.GetUserStats#1");
+    constexpr uint32 HASH_JOB_GetManifestRequestCode = Fnv1aHash("ContentServerDirectory.GetManifestRequestCode#1");
 
 } // anonymous namespace
 
@@ -441,6 +445,123 @@ namespace Hooks_NetPacket_FamilySharing {
 
 
 // ════════════════════════════════════════════════════════════════
+//  Hooks_NetPacket_Manifest
+//
+//  Outgoing: ContentServerDirectory.GetManifestRequestCode#1  (eMsg 151)
+//  Incoming: ContentServerDirectory.GetManifestRequestCode#1  (eMsg 147)
+//
+//  Launches an async HTTP fetch on send; the recv handler waits up to
+//  12 s for the result and patches both header (eresult=OK) and body
+//  (manifest_request_code).  On timeout or failure the original
+//  response passes through unmodified.
+// ════════════════════════════════════════════════════════════════
+namespace Hooks_NetPacket_Manifest {
+
+    std::unordered_map<uint64, std::shared_future<uint64>> g_CodeFutures;
+    std::mutex g_CodeMutex;
+    constexpr uint32 kMaxWaitSeconds = 12;
+
+    bool HandleSend(const uint8* pBody, uint32 cbBody,
+                    const uint8* pHdr, uint32 cbHdr)
+    {
+        CContentServerDirectory_GetManifestRequestCode_Request req;
+        if (!req.ParseFromArray(pBody, cbBody)) {
+            LOG_MANIFEST_WARN("GetManifestRequestCode: failed to parse request");
+            return false;
+        }
+        if (!req.has_depot_id() || !req.has_manifest_id()) return false;
+        if (!LuaConfig::HasDepot(req.depot_id())) return false;
+
+        CMsgProtoBufHeader hdr;
+        if (!hdr.ParseFromArray(pHdr, cbHdr) || !hdr.has_jobid_source()) {
+            LOG_MANIFEST_WARN("GetManifestRequestCode: missing jobid_source in header");
+            return false;
+        }
+
+        uint64 jobId       = hdr.jobid_source();
+        uint64 manifestGid = req.manifest_id();
+        uint32 depotId     = req.depot_id();
+
+        LOG_MANIFEST_DEBUG("GetManifestRequestCode send: depot={} gid={} jobid={}",
+                            depotId, manifestGid, jobId);
+
+        auto task = std::async(std::launch::async,
+            [manifestGid]() -> uint64 {
+                uint64 code = 0;
+                Hooks_Manifest::FetchManifestRequestCode(manifestGid, &code);
+                return code;
+            });
+
+        {
+            std::lock_guard<std::mutex> lock(g_CodeMutex);
+            g_CodeFutures[jobId] = task.share();
+        }
+
+        return false; // Don't modify the outgoing request body
+    }
+
+    void HandleRecv(const uint8* pBody, uint32 cbBody,
+                    const uint8* pHdr, uint32 cbHdr)
+    {
+        CMsgProtoBufHeader hdr;
+        if (!hdr.ParseFromArray(pHdr, cbHdr)){
+            LOG_MANIFEST_WARN("GetManifestRequestCode recv: failed to ParseFromArray original header");
+            return;
+        }
+
+        uint64 jobId = hdr.jobid_target();
+        std::shared_future<uint64> future;
+
+        {
+            std::lock_guard<std::mutex> lock(g_CodeMutex);
+            auto it = g_CodeFutures.find(jobId);
+            if (it == g_CodeFutures.end()) return;
+            future = it->second;
+            g_CodeFutures.erase(it); // Always clean up immediately
+        }
+        // Wait up to kMaxWaitSeconds seconds for the HTTP fetch to complete
+        auto status = future.wait_for(std::chrono::seconds(kMaxWaitSeconds));
+        if (status != std::future_status::ready) {
+            LOG_MANIFEST_WARN("GetManifestRequestCode recv: HTTP timed out for jobid={}", jobId);
+            return;
+        }
+
+        uint64 code = future.get();
+        if (!code) {
+            LOG_MANIFEST_WARN("GetManifestRequestCode recv: HTTP returned 0 for jobid={}", jobId);
+            return;
+        }
+
+        LOG_MANIFEST_DEBUG("GetManifestRequestCode recv: injecting code={} for jobid={}",
+                            code, jobId);
+
+        // Header: set eresult=OK
+        hdr.set_eresult(static_cast<int32_t>(k_EResultOK));
+        g_cbNewHdr = static_cast<uint32>(hdr.ByteSizeLong());
+        if (g_cbNewHdr > kMaxHdrSize || !hdr.SerializeToArray(g_NewHdr, kMaxHdrSize)){
+            LOG_MANIFEST_WARN("GetManifestRequestCode recv: failed to SerializeToArray modified header,"
+                    "g_cbNewHdr: {}, kMaxHdrSize: {}", g_cbNewHdr, kMaxHdrSize);
+            return;
+        }
+        g_NeedReplaceHdr = true;
+
+        // Body: set manifest_request_code
+        CContentServerDirectory_GetManifestRequestCode_Response resp;
+        resp.set_manifest_request_code(code);
+
+        g_cbNewBody = static_cast<uint32>(resp.ByteSizeLong());
+        if (g_cbNewBody > kMaxBodySize || !resp.SerializeToArray(g_NewBody, kMaxBodySize)){
+            LOG_MANIFEST_WARN("GetManifestRequestCode recv: failed to SerializeToArray modified body,"
+                "g_cbNewBody:{}, kMaxBodySize:{}", g_cbNewBody, kMaxBodySize);
+            return;
+        }
+        g_NeedReplaceBody = true;
+    }
+
+} // namespace Hooks_NetPacket_Manifest
+
+
+// ════════════════════════════════════════════════════════════════
 //  Dispatch
 // ════════════════════════════════════════════════════════════════
 namespace {
@@ -454,6 +575,9 @@ namespace {
 
         case HASH_JOB_GetUserStats:
             return Hooks_NetPacket_UserStats::HandleSend_GetUserStats(pBody, cbBody, pHdr, cbHdr);
+
+        case HASH_JOB_GetManifestRequestCode:
+            return Hooks_NetPacket_Manifest::HandleSend(pBody, cbBody, pHdr, cbHdr);
 
         // ---- add new 151 service methods here ----
         }
@@ -509,6 +633,10 @@ namespace {
             Hooks_NetPacket_UserStats::HandleRecv_GetUserStatsResponse(pHdr, cbHdr, pBody, cbBody);
             return;
 
+        case HASH_JOB_GetManifestRequestCode:
+            Hooks_NetPacket_Manifest::HandleRecv(pBody, cbBody, pHdr, cbHdr);
+            return;
+
         // ---- add new 147 service methods here ----
         }
     }
@@ -535,9 +663,10 @@ namespace {
             return;
         }
 
-        case k_EMsgClientRequestEncryptedAppTicketResponse:     // 5527
-            Hooks_NetPacket_ETicket::HandleEncryptedAppTicketResponse(pBody, cbBody);
-            return;
+        // migrated to IPC Layer Hooks_IPC_ISteamUser::GetEncryptedAppTicketResponse
+        // case k_EMsgClientRequestEncryptedAppTicketResponse:     // 5527
+        //     Hooks_NetPacket_ETicket::HandleEncryptedAppTicketResponse(pBody, cbBody);
+        //     return;
 
         case k_EMsgClientGetUserStatsResponse:     // 819
             g_NeedReplaceBody = Hooks_NetPacket_UserStats::HandleRecv_ClientGetUserStatsResponse(
@@ -581,7 +710,7 @@ namespace {
         return oBBuildAndAsyncSendFrame(pObject, eWebSocketOpCode, pubData, cubData);
     }
 
-    HOOK_FUNC(RecvMultiPkt, void*, void* pThis, CNetPacket* pPacket)
+    HOOK_FUNC(RecvPkt, void*, void* pThis, CNetPacket* pPacket)
     {
         EMsg eMsg;
         const uint8 *pBody, *pHdr;
@@ -607,7 +736,7 @@ namespace {
             }
         }
 
-        return oRecvMultiPkt(pThis, pPacket);
+        return oRecvPkt(pThis, pPacket);
     }
 
 } // anonymous namespace
@@ -618,14 +747,14 @@ namespace Hooks_NetPacket {
         RESOLVE_D(PchMsgNameFromEMsg);
         HOOK_BEGIN();
         INSTALL_HOOK_D(BBuildAndAsyncSendFrame);
-        INSTALL_HOOK_D(RecvMultiPkt);
+        INSTALL_HOOK_D(RecvPkt);
         HOOK_END();
     }
 
     void Uninstall() {
         UNHOOK_BEGIN();
         UNINSTALL_HOOK(BBuildAndAsyncSendFrame);
-        UNINSTALL_HOOK(RecvMultiPkt);
+        UNINSTALL_HOOK(RecvPkt);
         UNHOOK_END();
         oPchMsgNameFromEMsg = nullptr;
     }

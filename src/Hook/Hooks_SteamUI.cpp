@@ -3,6 +3,7 @@
 
 namespace {
     HOOK_FUNC(LoadModuleWithPath, HMODULE, const char* path, bool flags) {
+        LOG_INFO("LoadModuleWithPath called with path: {} , flags: {}", path, flags);
         HMODULE h = oLoadModuleWithPath(path, flags);
         if (!strcmp(path, "steamclient64.dll"))
             h = diversion_hMdoule;
