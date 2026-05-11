@@ -1,5 +1,6 @@
 #include "Hooks_NetPacket.h"
 #include "Hooks_Manifest.h"
+#include "Hooks_Misc.h"
 #include "HookMacros.h"
 #include "dllmain.h"
 #include "Utils/AppTicket.h"
@@ -481,14 +482,15 @@ namespace Hooks_NetPacket_Manifest {
         uint64 jobId       = hdr.jobid_source();
         uint64 manifestGid = req.manifest_id();
         uint32 depotId     = req.depot_id();
+        uint32 appId       = req.has_app_id() ? req.app_id() : 0;
 
-        LOG_MANIFEST_DEBUG("GetManifestRequestCode send: depot={} gid={} jobid={}",
-                            depotId, manifestGid, jobId);
+        LOG_MANIFEST_DEBUG("GetManifestRequestCode send: depot={} gid={} jobid={} app_id={}",
+                            depotId, manifestGid, jobId, appId);
 
         auto task = std::async(std::launch::async,
-            [manifestGid]() -> uint64 {
+            [manifestGid, depotId, appId]() -> uint64 {
                 uint64 code = 0;
-                Hooks_Manifest::FetchManifestRequestCode(manifestGid, &code);
+                Hooks_Manifest::FetchManifestRequestCode(manifestGid, &code, appId, depotId);
                 return code;
             });
 
@@ -562,6 +564,66 @@ namespace Hooks_NetPacket_Manifest {
 
 
 // ════════════════════════════════════════════════════════════════
+//  Hooks_NetPacket_OnlineFix
+//
+//  Outgoing: CMsgClientGamesPlayed (eMsg 742 / 5410)
+//
+//  When a game launched with -onlinefix reports appid 480, replace
+//  game_extra_info with the real game's localized name so friends
+//  see the correct title.
+// ════════════════════════════════════════════════════════════════
+namespace Hooks_NetPacket_OnlineFix {
+
+    bool HandleSend(const uint8* pBody, uint32 cbBody)
+    {
+        CMsgClientGamesPlayed msg;
+        if (!msg.ParseFromArray(pBody, cbBody)) {
+            LOG_ONLINEFIX_WARN("OnlineFix: failed to parse CMsgClientGamesPlayed");
+            return false;
+        }
+        LOG_ONLINEFIX_DEBUG("OnlineFix: original body:\n{}", msg.DebugString());
+
+        bool patched = false;
+        for (int i = 0; i < msg.games_played_size(); ++i) {
+            auto* game = msg.mutable_games_played(i);
+            AppId_t appid = static_cast<AppId_t>(game->game_id() & UINT32_MAX);
+
+            // SpawnProcess rewrites pGameID to 480, so game_id is already 480.
+            // Fill game_extra_info with the real game name.
+            if (appid == kOnlineFixAppId) {
+                AppId_t realAppId = Hooks_Misc::ResolveAppId();
+                if (realAppId && LuaConfig::HasDepot(realAppId)) {
+                    std::string name = Hooks_Misc::GetGameNameByAppID(realAppId);
+                    if (!name.empty()) {
+                        game->set_game_extra_info(name);
+                        patched = true;
+                        LOG_ONLINEFIX_INFO("OnlineFix: 480 -> name '{}' (real appid {})",
+                            name, realAppId);
+                    }
+                }
+            }
+        }
+
+        if (!patched) return false;
+
+        g_cbSendNewBody = static_cast<uint32>(msg.ByteSizeLong());
+        if (g_cbSendNewBody > kMaxBodySize) {
+            LOG_ONLINEFIX_WARN("OnlineFix: encoded size {} exceeds buffer", g_cbSendNewBody);
+            return false;
+        }
+        if (!msg.SerializeToArray(g_SendNewBody, kMaxBodySize)) {
+            LOG_ONLINEFIX_WARN("OnlineFix: failed to SerializeToArray");
+            return false;
+        }
+
+        LOG_ONLINEFIX_DEBUG("OnlineFix: modified body:\n{}", msg.DebugString());
+        return true;
+    }
+
+} // namespace Hooks_NetPacket_OnlineFix
+
+
+// ════════════════════════════════════════════════════════════════
 //  Dispatch
 // ════════════════════════════════════════════════════════════════
 namespace {
@@ -604,6 +666,11 @@ namespace {
 
         case k_EMsgClientPICSProductInfoRequest:     // 8903
             g_NeedReplaceSend = Hooks_NetPacket_AccessToken::HandleSend(pBody, cbBody);
+            return;
+
+        case k_EMsgClientGamesPlayed:                 // 742
+        case k_EMsgClientGamesPlayedWithDataBlob:     // 5410
+            g_NeedReplaceSend = Hooks_NetPacket_OnlineFix::HandleSend(pBody, cbBody);
             return;
 
         case k_EMsgClientGetUserStats:               // 818

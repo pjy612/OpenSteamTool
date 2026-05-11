@@ -7,11 +7,14 @@ OpenSteamTool is a Windows DLL project built with CMake.
 ### Core Unlocks
 - Unlock an unlimited number of unowned games.
 - Unlock all DLCs for unowned games.
-- Support auto load depot decryption keys from Lua config, no need to manually input them in `config.vdf` anymore.
-- Support auto manifest download via `steamrun` / `wudrm` upstream APIs, or a custom Lua endpoint (see [Manifest via Lua](#manifest-via-lua)).
+- Support auto load depot decryption keys from Lua config.
+- Support auto manifest download via `steamrun` / `wudrm` upstream APIs(default is `wudrm`), or a custom Lua endpoint (see [Manifest via Lua](#manifest-via-lua)).
 - Support downloading protected games or DLCs that require an access token.
-- Support binding manifest to prevent specific games from being updated, it will be writen to `appinfo.vdf` so if you don't want to bind anymore, just delete the corresponding entry in `appinfo.vdf` and delete this bind from Lua.
-  
+- Support binding manifest to prevent specific games from being updated.
+
+### Hot reload on new .lua files: 
+- adding a `.lua` file to any watched directory automatically triggers a full reload. No restart, no offline/online toggle needed. Note: only additions are detected; removing or modifying an existing .lua file does not trigger a reload, and revoking is not supported.
+
 ### Family Sharing and Remote Play
 - Bypass Steam Family Sharing restrictions, allowing shared games to be played without limitations.
 
@@ -25,10 +28,14 @@ OpenSteamTool is a Windows DLL project built with CMake.
 - Uses `setStat(appid, "steamid")` to configure which SteamID's achievement data to pull.
 - If no `setStat` is configured for an app, falls back to the hardcoded default SteamID `76561198028121353`.
 
+### Online Fix
+- Add `-onlinefix` to the Steam launch parameters to enable 480-based online play in games that use lobby matchmaking. The current limitation is that only one such game can run at a time.To revert, simply remove -onlinefix from the launch parameters — online play returns to normal on the next launch.
+
 ## Future
-- For games protected by Denuvo and SteamStub, find a safe timing to switch `GetSteamID` (see `src/Hook/Hooks_IPC.cpp#Handler_IClientUser_GetSteamID` TODO) so save files are not affected.
+- For games protected by Denuvo and SteamStub, find a safe timing to switch `GetSteamID` (see `src/Hook/Hooks_IPC.cpp#Handler_IClientUser_GetSteamID` TODO) so save files are not affected.(**Suggestions welcome — when is the earliest point after game initialization that we can safely switch the
+  SteamID without affecting save file binding?**)
 - Steam Cloud synchronization support.(This is a huge project)
-- Using the 480 AppID for network spoof.
+- Add Auto Denuvo Authorization Sharing for Legitimate Accounts.
 
 ## Usage
 1. Run `build.bat` from the project root to build the project.
@@ -44,7 +51,8 @@ addtoken(1361510,"2764735786934684318") -- add access token ("276473578693468431
 -- No Longer Supported:
 --pinApp(1361510) -- pin game with appid 1361510 to prevent it from being updated
 
-setManifestid(1361511,"5656605350306673283") -- pin depotid:1361511 manifest_gid:5656605350306673283 ,manifest_size:0(we don't need to specify it)
+setManifestid(1361511,"5656605350306673283") -- pin depotid:1361511 manifest_gid:5656605350306673283, size defaults to 0
+setManifestid(1361511,"5656605350306673283", 12345678) -- same but with explicit size
 
 setAppTicket(1361510,"0100000000000000...") -- write AppTicket (REG_BINARY) to HKCU\Software\Valve\Steam\Apps\1361510\AppTicket
 
@@ -58,7 +66,7 @@ All function names are **case-insensitive**. `setAppTicket`, `setappticket`, `Se
 
 ### Configuration (optional)
 
-Rename `opensteamtool.example.toml` to `opensteamtool.toml` and place it in the Steam root directory (next to `steam.exe`).  
+Rename `opensteamtool.example.toml` to `opensteamtool.toml` and place it in the Steam root directory (next to `steam.exe`).
 If no config file is found, built-in defaults are used — no auto-creation.
 
 ```toml
@@ -75,13 +83,27 @@ timeout_resolve_ms = 5000
 timeout_connect_ms = 5000
 timeout_send_ms    = 10000
 timeout_recv_ms    = 10000
+
+# Additional Lua config directories (optional).
+# Files are loaded after the default <Steam>/config/lua folder.
+# The default folder is always loaded last so user files take priority.
+[lua]
+paths = []
 ```
 
 ### Manifest via Lua
 
-If `<Steam>/config/lua/manifest.lua` defines `fetch_manifest_code(gid)`, it
-overrides the `[manifest] url` setting.  The C++ runtime provides two Lua
-helpers:
+Two manifest code functions are supported:
+
+#### `fetch_manifest_code(gid)`
+
+Basic function that receives only the manifest GID.
+
+#### `fetch_manifest_code_ex(app_id, depot_id, gid)` *(recommended)*
+
+Extended function that receives `app_id`, `depot_id`, and `gid`. Allows constructing API endpoints that require app identification.
+
+The C++ runtime provides two Lua helpers:
 
 | Function | Signature | Returns |
 |----------|-----------|---------|
@@ -106,6 +128,7 @@ Debug builds write per-module log files under `<Steam>/opensteamtool/`:
 | `winhttp.log`       | `LOG_WINHTTP_*` | HTTP requests  |
 | `achievement.log`   | `LOG_ACHIEVEMENT_*` | UserStats requests/responses, steamid spoofing |
 | `pics.log`          | `LOG_PICS_*` | PICS access token injection |
+| `package.log`       | `LOG_PACKAGE_*` | Package injection |
 
 The log level is controlled by `[log] level` in `opensteamtool.toml`.
 

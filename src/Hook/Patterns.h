@@ -23,7 +23,8 @@
 #define GetManifestRequestCodeSig  "48 89 5C 24 18 55 56 57 41 55 41 57 48 8D 6C 24 A0"
 #define ModifyStateFlagsSig        "48 89 5C 24 10 48 89 6C 24 18 48 89 7C 24 20 41 56 48 81 EC 90 04 00 00"
 #define GetAppIDForCurrentPipeSig  "48 83 EC 08 8B 81 30 0D 00 00 4C 8B D9 44 8B 91 D8 00 00 00 83 F8 FF"
-#define InitialRunningGameSig      "48 89 5C 24 18 4C 89 4C 24 20 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 20 FF"
+#define SpawnProcessSig            "48 89 5C 24 18 4C 89 4C 24 20 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 20 FF"
+#define GetAppDataFromAppInfoSig   "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 56 41 57 48 81 EC 70 01 00 00"
 #define GetConfigStringSig         "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 81 EC 30 04 00 00 48 8B B4 24 60 04 00 00"
 #define BuildDepotDependencySig    "48 8B C4 4C 89 48 20 89 50 10 48 89 48 08 55 ?? 48 8D"
 #define AddAccessTokenSig          "89 48 20 48 8B 4B 18 89 50 10 48 89 48 18"
@@ -33,6 +34,9 @@
 #define BBuildAndAsyncSendFrameSig "48 8B C4 55 48 8D 68 A1 48 81 EC C0 00 00 00"
 #define PchMsgNameFromEMsgSig      "48 89 5C 24 08 57 48 83 EC 20 8B D9 E8"
 #define CUtlBufferEnsureCapacitySig "48 89 5C 24 ?? 57 48 83 EC ?? 0F B6 41 ?? 8D 7A"
+#define MarkLicenseAsChangedSig    "89 54 24 ?? 53 55 56 57 41 56 48 83 EC"
+#define GetPackageInfoSig          "48 89 6C 24 ?? 41 56 48 83 EC ?? 8B 41 ?? 49 8B E8"
+#define ProcessPendingLicenseUpdatesSig "4C 8B DC 49 89 4B 08 41 55 41 57 48 83 EC 48 4C 8B E9"
 
 /* -------------------------------------------------------------------------- */
 /*                     KeyValues — multi-signature arrays                      */

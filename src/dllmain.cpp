@@ -1,5 +1,6 @@
 #include "dllmain.h"
 #include "Hook/HookManager.h"
+#include "Utils/FileWatcher.h"
 
 // Load diversion.dll and prepare key runtime paths.
 bool LoadDiversion()
@@ -44,9 +45,17 @@ static DWORD WINAPI InitThread(LPVOID param) {
 
     Config::Load(ConfigPath);
     Log::InitModules();
-    LuaConfig::ParseDirectory(std::string(LuaDir));
+
+    std::vector<std::string> watchDirs = Config::luaPaths;
+    watchDirs.push_back(std::string(LuaDir));
+    for (const auto& dir : watchDirs)
+        LuaConfig::ParseDirectory(dir);
+
+    FileWatcher::Start(watchDirs);
+
     SteamUI::CoreHook();
     SteamClient::CoreHook();
+    g_HooksInstalled.store(true);
     LOG_INFO("OpenSteamTool init complete");
     return 0;
 }
@@ -63,6 +72,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, PVOID pvReserved)
     }
     else if (dwReason == DLL_PROCESS_DETACH)
     {
+        FileWatcher::Stop();
         SteamUI::CoreUnhook();
         SteamClient::CoreUnhook();
     }

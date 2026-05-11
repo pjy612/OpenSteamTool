@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <regex>
 #include <memory>
+#include <atomic>
 #include <format>
 
 #include "Steam/Types.h"
@@ -22,11 +23,14 @@
 
 
 inline HMODULE diversion_hMdoule = nullptr;
+inline std::atomic<bool> g_HooksInstalled{false};
 inline char SteamInstallPath[MAX_PATH] = {};
 inline char SteamclientPath[MAX_PATH] = {};
 inline char DiversionPath[MAX_PATH] = {};
 inline char LuaDir[MAX_PATH] = {};
 inline char ConfigPath[MAX_PATH] = {};
 
+// The fake AppId used by -onlinefix (SpaceWar).
+constexpr AppId_t kOnlineFixAppId = 480;
 
 #endif // DLLMAIN_H

@@ -2,6 +2,9 @@
 #define LUACONFIG_H
 
 #include <cstdint>
+#include <unordered_map>
+#include <string>
+#include <vector>
 
 namespace LuaConfig{
     bool HasDepot(AppId_t appId);
@@ -16,17 +19,16 @@ namespace LuaConfig{
           uint64_t gid;
           uint64_t size;
     };
-    // depotId → {gid, size}
     const std::unordered_map<uint64_t, ManifestOverride>& GetManifestOverrides();
 
+    void ParseFile(const std::string& filePath);
     void ParseDirectory(const std::string& directory);
 
-    // manifest.lua — fetch_manifest_code(gid) -> uint64 | nil
-    // Returns true if manifest.lua defined a fetch_manifest_code function.
     bool HasManifestCodeFunc();
-    // Call the Lua fetch_manifest_code(gid). Returns false if no function or
-    // it returned nil.
     bool CallManifestFetchCode(uint64_t gid, uint64_t* outCode);
+
+    bool HasManifestCodeFuncEx();
+    bool CallManifestFetchCodeEx(uint64_t app_id, uint64_t depot_id, uint64_t gid, uint64_t* outCode);
 }
 
 #endif // LUACONFIG_H

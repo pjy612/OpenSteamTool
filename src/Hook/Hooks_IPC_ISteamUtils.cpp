@@ -1,28 +1,20 @@
-#include "Hooks_IPC_ISteamUtils.h"
 #include "Hooks_IPC.h"
+#include "Hooks_IPC_ISteamUtils.h"
 #include "Hooks_IPC_ISteamUser.h"
+#include "Hooks_Misc.h"
 #include "Steam/Callback.h"
 #include "Utils/Log.h"
 
 namespace {
 
-    constexpr uint32 HASH_IClientUtils_GetAppID              = 0x09607EC4;
-    constexpr uint32 HASH_IClientUtils_GetAPICallResult      = 0x2D3D3947;
-
-    // ── GetAPICallResult request layout (after 10-byte header) ────
-    //  offset 10: hSteamAPICall      (uint64)
-    //  offset 18: cubCallback        (uint32)
-    //  offset 22: iCallbackExpected  (uint32)
-    constexpr int GACR_OFF_HASYNCCALL   = OFFSET_ARGS;
-    constexpr int GACR_OFF_CUBCALLBACK  = OFFSET_ARGS + 8;
-    constexpr int GACR_OFF_CALLBACKID   = OFFSET_ARGS + 12;
-    constexpr int GACR_ARGS_SIZE        = 16;  // 8+4+4
+    // ── IClientUtils::GetAPICallResult request args ──────────────
+    struct GetAPICallResultRequest {
+        uint64  hSteamAPICall;     // +0
+        uint32  cubCallback;       // +8
+        uint32  iCallbackExpected; // +12
+    };
 
     // ── Helper: write the GetAPICallResult response boilerplate ───
-    //  Response layout: prefix(1) + retval(1) + CallbackT + pbFailed(1)
-    //
-    //  Uses a lambda Fill(CallbackT&) to populate the struct, keeping
-    //  per-callback logic concise.  Returns false when pWrite is too small.
     template<typename CallbackT, typename F>
     bool WriteCallbackResponse(CUtlBuffer* pWrite, F&& fill)
     {
@@ -31,34 +23,36 @@ namespace {
 
         uint8* base = pWrite->m_Memory.m_pMemory;
         base[0] = RESPONSE_PREFIX;
-        base[1] = 1;                           // retval = true
-        base[2 + sizeof(CallbackT)] = 0;       // *pbFailed = false
+        base[1] = 1;
+        base[2 + sizeof(CallbackT)] = 0;
 
         auto* cb = reinterpret_cast<CallbackT*>(base + 2);
         fill(*cb);
         return true;
     }
 
-    // ── Handler: IClientUtils::GetAppID ───────────────────────────
-    //  Request:  no args
-    //  Response: [uint8 prefix=0x0B][uint32 AppID]  (5 bytes)
-    //
-    //  Passthrough for now - the real Steam already returns the
-    //  correct AppID resolved from the pipe.
-    void Handler_IClientUtils_GetAppID(CUtlBuffer*, const uint8*, int32, AppId_t)
+    // ── Handler: IClientUtils::GetAppID ──────────────────────────
+    //  SpawnProcess rewrites pGameID to 480 for OnlineFix games,
+    //  so steamclient returns 480.  Restore the real app_id.
+    void Handler_IClientUtils_GetAppID(
+        CSteamPipeClient* pipe, CUtlBuffer*, CUtlBuffer* pWrite)
     {
-        // No spoofing needed for now.
+        AppId_t realAppId = Hooks_Misc::ResolveAppId();
+        if (!realAppId || pWrite->m_Put < 5) return;
+
+        AppId_t current = *reinterpret_cast<const AppId_t*>(pWrite->Base() + 1);
+        if (current == realAppId) return;
+
+        *reinterpret_cast<AppId_t*>(pWrite->Base() + 1) = realAppId;
+        LOG_IPC_INFO("GetAppID: spoof response {} -> {}", current, realAppId);
     }
 
     // ════════════════════════════════════════════════════════════════
     //  GetAPICallResult per-callback handlers
-    //
-    //  Each handler receives the already-parsed fields plus the
-    //  pWrite buffer.  Return true when the response was spoofed.
     // ════════════════════════════════════════════════════════════════
 
     bool HandleCallback_EncryptedAppTicketResponse(
-        CUtlBuffer* pWrite, uint64 hAsyncCall, int32 cubCallback)
+        CUtlBuffer* pWrite, uint64 hAsyncCall, uint32 cubCallback)
     {
         AppId_t appId = Hooks_IPC_ISteamUser::LookupEticketAsyncCall(hAsyncCall);
         if (!appId) return false;
@@ -74,42 +68,38 @@ namespace {
         return true;
     }
 
-    // ── Dispatch table entry ──────────────────────────────────────
     struct GacrDispatchEntry {
-        int32    callbackId;
-        bool   (*handler)(CUtlBuffer* pWrite, uint64 hAsyncCall, int32 cubCallback);
+        uint32  callbackId;
+        bool  (*handler)(CUtlBuffer* pWrite, uint64 hAsyncCall, uint32 cubCallback);
     };
 
     constexpr GacrDispatchEntry g_GacrDispatch[] = {
         { EncryptedAppTicketResponse_t::k_iCallback, HandleCallback_EncryptedAppTicketResponse },
     };
 
-    // ── Handler: IClientUtils::GetAPICallResult ───────────────────
+    // ── Handler: IClientUtils::GetAPICallResult ──────────────────
     void Handler_IClientUtils_GetAPICallResult(
-        CUtlBuffer* pWrite, const uint8* reqData, int32 reqSize, AppId_t appId)
+        CSteamPipeClient*, CUtlBuffer* pRead, CUtlBuffer* pWrite)
     {
-        if (reqSize < OFFSET_ARGS + GACR_ARGS_SIZE) return;
+        if (pRead->m_Put < OFFSET_ARGS + sizeof(GetAPICallResultRequest)) return;
 
-        const uint64 hAsyncCall = *reinterpret_cast<const uint64*>(reqData + GACR_OFF_HASYNCCALL);
-        const uint32 iCallback  = *reinterpret_cast<const uint32*>(reqData + GACR_OFF_CALLBACKID);
-        const int32  cubCallback = static_cast<int32>(*reinterpret_cast<const uint32*>(reqData + GACR_OFF_CUBCALLBACK));
+        const auto* req = reinterpret_cast<const GetAPICallResultRequest*>(
+            pRead->Base() + OFFSET_ARGS);
+
+        AppId_t appId = Hooks_Misc::GetAppIDForCurrentPipe();
         LOG_IPC_DEBUG("GetAPICallResult: hAsyncCall=0x{:016X} AppId={} iCallback={} cubCallback={}",
-                  hAsyncCall, appId, iCallback, cubCallback);
+                  req->hSteamAPICall, appId, req->iCallbackExpected, req->cubCallback);
         for (auto& entry : g_GacrDispatch) {
-            if (entry.callbackId == iCallback) {
-                entry.handler(pWrite, hAsyncCall, cubCallback);
+            if (entry.callbackId == req->iCallbackExpected) {
+                entry.handler(pWrite, req->hSteamAPICall, req->cubCallback);
                 return;
             }
         }
     }
 
     const Hooks_IPC::IpcHandlerEntry g_Entries[] = {
-        { EIPCInterface::IClientUtils, HASH_IClientUtils_GetAppID,
-          "IClientUtils::GetAppID",
-          Handler_IClientUtils_GetAppID },
-        { EIPCInterface::IClientUtils, HASH_IClientUtils_GetAPICallResult,
-          "IClientUtils::GetAPICallResult",
-          Handler_IClientUtils_GetAPICallResult },
+        ADD_IPC_HANDLER(IClientUtils, GetAppID),
+        ADD_IPC_HANDLER(IClientUtils, GetAPICallResult),
     };
 
 } // namespace

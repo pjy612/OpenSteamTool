@@ -44,9 +44,20 @@ namespace Config {
                 }
             }
 
-            LOG_INFO("Config loaded: manifest.url={} log.level={}",
+            // [lua]
+            if (auto lua = tbl["lua"].as_table()) {
+                if (auto arr = (*lua)["paths"].as_array()) {
+                    for (auto& elem : *arr) {
+                        if (auto str = elem.value<std::string>()) {
+                            luaPaths.push_back(*str);
+                        }
+                    }
+                }
+            }
+
+            LOG_INFO("Config loaded: manifest.url={} log.level={} lua.paths={}",
                      manifestUrl == ManifestUrl::Wudrm ? "wudrm" : "steamrun",
-                     [&]{
+                     [&](){
                          switch (logLevel) {
                          case LogLevel::Trace: return "trace";
                          case LogLevel::Debug: return "debug";
@@ -55,7 +66,8 @@ namespace Config {
                          case LogLevel::Error: return "error";
                          default: return "???";
                          }
-                     }());
+                     }(),
+                     (uint32_t)luaPaths.size());
 
         } catch (const toml::parse_error& e) {
             LOG_WARN("Config parse error: {}", e.what());

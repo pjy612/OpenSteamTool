@@ -207,3 +207,25 @@ struct ExtendedMsgHdr
 	int32 m_nSessionID;
 };
 #pragma pack(pop)
+
+// ── CSteamPipeClient ────────────────────────────────────────────
+struct CSteamPipeClient {
+    void*    m_pServer;         // +0
+    void*    m_pClient;         // +8
+    uint32   m_hSteamPipe;      // +16
+    uint8    _pad0[12];         // +20
+    uint32   m_clientPID;       // +32
+    uint8    _pad1[4];          // +36
+    char*    m_szProcessName;   // +40
+    uint8    _pad2[80];         // +48
+    int32    m_nActiveRefs;     // +128
+    uint8    _pad3[188];        // +132
+    void*    m_pLocalIPCServer; // +320
+    bool     m_bInProcess;      // +328
+    uint8    _pad4[31];         // +329
+
+	std::string DebugString() const {
+		return std::format("pipe=0x{:08X} pid={} proc={} ",
+			m_hSteamPipe, m_clientPID, m_szProcessName ? m_szProcessName : "?");
+	}
+};

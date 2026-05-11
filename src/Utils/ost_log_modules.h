@@ -10,7 +10,7 @@
 //
 //  Adding a new module:
 //    1. Add  OST_MOD(NewMod, "newmod")  below.
-//    2. Add  LOG_NEWMOD_* macros in Log.h (one 5-line block).
+//    2. Run CMake configure (LOG_NEWMOD_* macros are auto-generated).
 // ─────────────────────────────────────────────────────────────────
 
 OST_MOD(IPC,           "ipc")
@@ -22,3 +22,5 @@ OST_MOD(Misc,          "misc")
 OST_MOD(WinHttp,       "winhttp")
 OST_MOD(Achievement,   "achievement")
 OST_MOD(Pics,          "pics")
+OST_MOD(OnlineFix,     "onlinefix")
+OST_MOD(Package,       "package")

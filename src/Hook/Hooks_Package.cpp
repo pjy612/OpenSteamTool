@@ -3,25 +3,24 @@
 #include "dllmain.h"
 
 namespace {
-    using CUtlMemoryGrow_t = void* (*)(CUtlVector<uint32>* pVec, int grow_size);
+    using CUtlMemoryGrow_t = void* (*)(CUtlVector<AppId_t>* pVec, int grow_size);
     CUtlMemoryGrow_t oCUtlMemoryGrow = nullptr;
 
     HOOK_FUNC(LoadPackage, bool, PackageInfo* pInfo, uint8* sha1, int32 cn, void* p4) {
         bool result = oLoadPackage(pInfo, sha1, cn, p4);
+
         if (pInfo->PackageId == 0) {
-            LOG_DEBUG("LoadPackage: package ID is 0,starting appid injection");
             std::vector<AppId_t> appIds = LuaConfig::GetAllDepotIds();
             if (!appIds.empty()) {
                 uint32 oldSize = pInfo->AppIdVec.m_Size;
                 uint32 numToAdd = static_cast<uint32>(appIds.size());
+                LOG_INFO("LoadPackage(PackageId=0): adding {} apps, oldSize={}", numToAdd, oldSize);
                 oCUtlMemoryGrow(&pInfo->AppIdVec, numToAdd);
-                LOG_DEBUG("LoadPackage: Adding {} appids", numToAdd);
                 for (uint32 i = 0; i < numToAdd; i++)
                     pInfo->AppIdVec.m_Memory.m_pMemory[oldSize + i] = appIds[i];
-            }else{
-                LOG_WARN("LoadPackage: no appids to add");
             }
         }
+
         return result;
     }
 

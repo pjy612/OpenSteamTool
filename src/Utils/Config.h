@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include <windows.h>
 
 namespace Config {
@@ -23,5 +24,8 @@ namespace Config {
 
     // derived from configPath: <steam>/opensteamtool/
     inline std::string logDir;
+
+    // [lua]
+    inline std::vector<std::string> luaPaths;
 
 }

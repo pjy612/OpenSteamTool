@@ -62,11 +62,13 @@ namespace {
                 DepotEntry& e = pDepotInfo->m_Memory.m_pMemory[i];
                 auto it = overrides.find(e.DepotId);
                 if (it != overrides.end()) {
+                    // if size=0 in the override, keep the original size(affects download display but not the actual download)
+                    uint64_t newSize = it->second.size ? it->second.size : e.ManifestSize;
                     LOG_MANIFEST_INFO("BuildDepotDependency: patching depot {} gid={}->{} size={}->{}",
                         e.DepotId, e.ManifestGid, it->second.gid,
-                        e.ManifestSize, it->second.size);
+                        e.ManifestSize, newSize);
                     e.ManifestGid  = it->second.gid;
-                    e.ManifestSize = it->second.size;
+                    e.ManifestSize = newSize;
                 }
             }
         }
@@ -192,9 +194,19 @@ namespace Hooks_Manifest {
     }
 
     // ── resolve (single-provider, no fallback) ────────────────────
-    bool FetchManifestRequestCode(uint64_t manifestGid, uint64_t* outRequestCode) {
+    bool FetchManifestRequestCode(uint64_t manifestGid, uint64_t* outRequestCode, AppId_t AppId, AppId_t DepotId) {
         std::lock_guard<std::mutex> lock(g_ConnectionMutex);
 
+        // Try extended Lua function first (receives app_id, depot_id, gid)
+        if (AppId && DepotId && LuaConfig::HasManifestCodeFuncEx()) {
+            if (LuaConfig::CallManifestFetchCodeEx(AppId, DepotId, manifestGid, outRequestCode)) {
+                LOG_MANIFEST_INFO("Manifest gid={} resolved via fetch_manifest_code_ex", manifestGid);
+                return true;
+            }
+            LOG_MANIFEST_WARN("Manifest gid={} fetch_manifest_code_ex returned nil, trying fetch_manifest_code", manifestGid);
+        }
+
+        // Fall back to original Lua function (receives gid only)
         if (LuaConfig::HasManifestCodeFunc()) {
             if (LuaConfig::CallManifestFetchCode(manifestGid, outRequestCode)) {
                 LOG_MANIFEST_INFO("Manifest gid={} resolved via manifest.lua", manifestGid);

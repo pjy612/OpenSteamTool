@@ -11,8 +11,9 @@ level = "info"
 # Which upstream API to query for depot manifest request codes.
 #   "steamrun"  → https://manifest.steam.run/api/manifest/{gid}
 #   "wudrm"     → http://gmrc.wudrm.com/manifest/{gid}
-# If <Steam>/config/lua/manifest.lua defines fetch_manifest_code(gid),
-# that Lua function takes priority over the url setting below.
+# If <Steam>/config/lua/manifest.lua defines fetch_manifest_code(gid) or
+# fetch_manifest_code_ex(app_id, depot_id, gid), those Lua functions take
+# priority over the url setting below.
 #
 # --- manifest.lua reference ---
 # The C++ side provides http_get(url [, headers]) and
@@ -33,6 +34,15 @@ level = "info"
 #     end
 #     return nil
 # end
+#
+# -- Extended variant with app_id and depot_id:
+# function fetch_manifest_code_ex(app_id, depot_id, gid)
+#     local body, st = http_get("https://your-api.com/manifest-code/" .. app_id .. "/" .. gid)
+#     if st == 200 and body and body:match("^%d+$") then
+#         return body
+#     end
+#     return nil
+# end
 url = "steamrun"
 
 # HTTP timeouts for manifest requests (milliseconds).
@@ -44,3 +54,12 @@ timeout_resolve_ms = 5000
 timeout_connect_ms = 5000
 timeout_send_ms    = 10000
 timeout_recv_ms    = 10000
+
+# Additional Lua config directories (optional).
+# Files are loaded after the default <Steam>/config/lua folder.
+# The default folder is always loaded last so user files take priority.
+# Example — load a custom directory on another drive:
+#   [lua]
+#   paths = ["D:/my-steam-config/lua"]
+[lua]
+# paths = []
