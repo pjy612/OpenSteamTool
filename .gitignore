@@ -21,3 +21,14 @@ build/
 
 # DLLs (keep only source files)
 !.deps/**/*.dll
+/CMakeFiles/
+/detours.dir/
+/_deps/
+/Debug/
+/dwmapi.dir/
+
+CMakeCache.txt
+*.vcxproj
+*.sln
+*.filters
+*.cmake
