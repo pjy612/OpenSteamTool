@@ -1,0 +1,4 @@
+[submodule "steam-monitor"]
+	path = steam-monitor
+	url = https://github.com/OpenSteam001/steam-monitor
+	branch = pattern
