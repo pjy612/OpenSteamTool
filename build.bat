@@ -3,9 +3,7 @@ setlocal EnableDelayedExpansion
 
 REM Always run from the script directory.
 cd /d "%~dp0"
-::echo %PATH%
-set "PATH=D:\Program Files\Microsoft Visual Studio\2022\Preview\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\;%PATH%"
-::echo %PATH%
+
 REM ---------------------------------------------------------------------------
 REM Configurable build options
 REM   GENERATOR  - CMake generator (default: auto-detect)
