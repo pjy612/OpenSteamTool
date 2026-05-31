@@ -27,6 +27,11 @@ namespace LuaConfig{
     static std::unordered_map<std::string, std::unordered_set<AppId_t>> g_fileDepots;
     // Reference count: how many files provide each depot.
     static std::unordered_map<AppId_t, uint32_t> g_depotRefCount;
+    // mtime (unix epoch seconds) of each parsed .lua file, captured at ParseFile entry.
+    static std::unordered_map<std::string, uint32_t> g_fileMtime;
+    // Per-appId purchase time: max(mtime) across every file that currently contributes it.
+    // Simple variant: never lowered on UnloadFile unless the refcount drops to zero.
+    static std::unordered_map<AppId_t, uint32_t> g_purchaseTime;
     // Depot IDs removed by UnloadFile / added by ParseFile, consumed by NotifyLicenseChanged.
     static std::vector<AppId_t> g_pendingRemovals;
     static std::vector<AppId_t> g_pendingAdditions;
@@ -34,6 +39,20 @@ namespace LuaConfig{
 
     // Case-insensitive function registry: lowercase name → C function
     static std::unordered_map<std::string, lua_CFunction> g_func_registry;
+
+    static bool ParseUInt64Decimal(const char* text, uint64_t* out) {
+        if (!text || !*text || !out) return false;
+        if (!std::all_of(text, text + strlen(text),
+                         [](unsigned char c) { return std::isdigit(c) != 0; })) {
+            return false;
+        }
+        try {
+            *out = std::stoull(text);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
 
     // ── Lua HTTP helpers ──────────────────────────────────────────
     //   http_get(url [, headers]) → body, status_code
@@ -160,6 +179,15 @@ namespace LuaConfig{
             if (g_fileDepots[g_currentFile].insert(DepotId).second) {
                 if (++g_depotRefCount[DepotId] == 1)
                     g_pendingAdditions.push_back(DepotId);
+                
+                // Update the appId's purchase time with the current file's mtime,
+                // keeping the maximum across every contributing file.
+                auto mtIt = g_fileMtime.find(g_currentFile);
+                if (mtIt != g_fileMtime.end()) {
+                    uint32_t mt = mtIt->second;
+                    auto& slot = g_purchaseTime[DepotId];
+                    if (mt > slot) slot = mt;
+                }
             }
         }
 
@@ -188,11 +216,11 @@ namespace LuaConfig{
             if (!lua_isstring(L, 2))
                 return luaL_error(L, "");
             const char* token = lua_tostring(L, 2);
-            // Convert the string token to a uint64_t value.
-            if(!std::all_of(token, token + strlen(token), ::isdigit)) {
+            uint64_t parsedToken = 0;
+            if (!ParseUInt64Decimal(token, &parsedToken)) {
                 return luaL_error(L, "");
             }
-            AccessTokenSet[AppId] = std::stoull(token);
+            AccessTokenSet[AppId] = parsedToken;
         }
 
         return 0;
@@ -241,10 +269,11 @@ namespace LuaConfig{
         uint64_t depotId = (uint64_t)(uint32_t)val;
         const char* gidStr = lua_tostring(L, 2);
 
-        if (!std::all_of(gidStr, gidStr + strlen(gidStr), ::isdigit))
+        uint64_t gid = 0;
+        if (!ParseUInt64Decimal(gidStr, &gid))
             return luaL_error(L, "setManifestid: gid must be all digits");
 
-        ManifestOverrides[depotId] = { std::stoull(gidStr), 0 };
+        ManifestOverrides[depotId] = { gid, 0 };
         return 0;
     }
 
@@ -335,10 +364,11 @@ namespace LuaConfig{
         AppId_t appId = static_cast<uint32_t>(val);
 
         const char* sidStr = lua_tostring(L, 2);
-        if (!std::all_of(sidStr, sidStr + strlen(sidStr), ::isdigit))
+        uint64_t steamId = 0;
+        if (!ParseUInt64Decimal(sidStr, &steamId))
             return luaL_error(L, "setStat: steamId must be all digits");
 
-        StatSteamIdSet[appId] = std::stoull(sidStr);
+        StatSteamIdSet[appId] = steamId;
         return 0;
     }
 
@@ -387,8 +417,12 @@ namespace LuaConfig{
     }
 
     // ── public query API ─────────────────────────────────────────
-    bool HasDepot(AppId_t DepotId) {
-        return DepotKeySet.count(DepotId) && !OwnedAppIdSet.count(DepotId);
+    bool HasDepot(AppId_t DepotId,bool checkOwned) {
+        return DepotKeySet.count(DepotId) && (!checkOwned || !IsOwned(DepotId));
+    }
+
+    bool IsOwned(AppId_t AppId) {
+        return OwnedAppIdSet.count(AppId);
     }
 
     void MarkOwned(AppId_t AppId) {
@@ -437,6 +471,11 @@ namespace LuaConfig{
         return kDefaultStatSteamId;
     }
 
+    uint32_t GetPurchaseTime(AppId_t AppId) {
+        auto it = g_purchaseTime.find(AppId);
+        return it != g_purchaseTime.end() ? it->second : 0;
+    }
+
     const std::unordered_map<uint64_t, ManifestOverride>& GetManifestOverrides() {
       return ManifestOverrides;
     }
@@ -472,13 +511,14 @@ namespace LuaConfig{
             *outCode = static_cast<uint64_t>(lua_tointeger(g_lua_state, -1));
         } else if (lua_isstring(g_lua_state, -1)) {
             const char* s = lua_tostring(g_lua_state, -1);
-            if (!std::all_of(s, s + strlen(s), ::isdigit)) {
-                LOG_MANIFEST_WARN("fetch_manifest_code({}) returned non-numeric string '{}'",
+            uint64_t parsed = 0;
+            if (!ParseUInt64Decimal(s, &parsed)) {
+                LOG_MANIFEST_WARN("fetch_manifest_code({}) returned invalid numeric string '{}'",
                                  gid, s);
                 lua_pop(g_lua_state, 1);
                 return false;
             }
-            *outCode = std::stoull(s);
+            *outCode = parsed;
         } else {
             LOG_MANIFEST_WARN("fetch_manifest_code({}) unexpected type (expected digit-string)",
                              gid);
@@ -521,13 +561,14 @@ namespace LuaConfig{
             *outCode = static_cast<uint64_t>(lua_tointeger(g_lua_state, -1));
         } else if (lua_isstring(g_lua_state, -1)) {
             const char* s = lua_tostring(g_lua_state, -1);
-            if (!std::all_of(s, s + strlen(s), ::isdigit)) {
-                LOG_MANIFEST_WARN("fetch_manifest_code_ex({}, {}, {}) returned non-numeric string '{}'",
+            uint64_t parsed = 0;
+            if (!ParseUInt64Decimal(s, &parsed)) {
+                LOG_MANIFEST_WARN("fetch_manifest_code_ex({}, {}, {}) returned invalid numeric string '{}'",
                                  app_id, depot_id, gid, s);
                 lua_pop(g_lua_state, 1);
                 return false;
             }
-            *outCode = std::stoull(s);
+            *outCode = parsed;
         } else {
             LOG_MANIFEST_WARN("fetch_manifest_code_ex({}, {}, {}) unexpected type (expected digit-string)",
                              app_id, depot_id, gid);
@@ -550,12 +591,14 @@ namespace LuaConfig{
             if (--g_depotRefCount[id] == 0) {
                 g_depotRefCount.erase(id);
                 DepotKeySet.erase(id);
+                g_purchaseTime.erase(id);
                 g_pendingRemovals.push_back(id);
             }
         }
 
         LOG_PACKAGE_INFO("UnloadFile: removed {} depots from {}", it->second.size(), filePath);
         g_fileDepots.erase(it);
+        g_fileMtime.erase(filePath);
     }
 
     std::vector<AppId_t> TakePendingRemovals() {
@@ -583,6 +626,21 @@ namespace LuaConfig{
         if (!file) {
             LOG_WARN("ParseFile: failed to open {}", path.filename().string());
             return;
+        }
+        
+        // Capture the file's last-modified time (unix epoch, seconds) so
+        // lua_addappid can stamp it onto every appId this file contributes.
+        // Portable conversion that does not require C++20 clock_cast.
+        {
+            std::error_code ec;
+            auto ftime = std::filesystem::last_write_time(path, ec);
+            uint32_t mtime = 0;
+            if (!ec) {
+                auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+                    ftime - decltype(ftime)::clock::now() + std::chrono::system_clock::now());
+                mtime = static_cast<uint32_t>(std::chrono::system_clock::to_time_t(sctp));
+            }
+            g_fileMtime[filePath] = mtime;
         }
 
         std::string chunk, line;
