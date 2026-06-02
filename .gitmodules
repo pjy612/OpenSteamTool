@@ -1,4 +1,8 @@
-[submodule "steam-monitor"]
-	path = steam-monitor
+[submodule "pattern"]
+	path = pattern
 	url = https://github.com/OpenSteam001/steam-monitor
 	branch = pattern
+[submodule "ipc"]
+	path = ipc
+	url = https://github.com/OpenSteam001/steam-monitor
+	branch = ipc
