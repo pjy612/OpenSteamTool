@@ -1,7 +1,9 @@
 #include "dllmain.h"
 #include "Hook/HookManager.h"
 #include "Utils/FileWatcher.h"
+#include "Utils/IPCLoader.h"
 #include "Utils/PatternLoader.h"
+#include "Utils/SteamDiagnostics.h"
 
 // prepare key runtime paths.
 bool InitializeSteamComponents()
@@ -45,6 +47,7 @@ static DWORD WINAPI InitThread(LPVOID param) {
 
     Config::Load(ConfigPath);
     Log::InitModules();
+    SteamDiagnostics::Initialize(SteamclientPath, SteamUIPath);
 
     // Load pattern files for steamclient64.dll and steamui.dll.
     // Each call computes the SHA-256 of the DLL on disk, checks the local
@@ -52,6 +55,9 @@ static DWORD WINAPI InitThread(LPVOID param) {
     // but run on this worker thread, never under the loader lock.
     PatternLoader::Load(ui_hModule, SteamUIPath, "steamui");
     PatternLoader::Load(client_hModule, SteamclientPath, "steamclient");
+
+    // IPC method metadata (funcHash, fencepost, argc, ...)
+    IPCLoader::Load(SteamclientPath);
 
     std::vector<std::string> watchDirs = Config::luaPaths;
     watchDirs.push_back(std::string(LuaDir));
@@ -66,7 +72,6 @@ static DWORD WINAPI InitThread(LPVOID param) {
     // Surface any functions that FindPattern() could not locate.
     PatternLoader::ReportMissingFunctions();
 
-    g_HooksInstalled.store(true);
     LOG_INFO("OpenSteamTool init complete");
     return 0;
 }

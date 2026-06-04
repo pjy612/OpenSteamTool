@@ -5,7 +5,7 @@
 
 namespace {
     // ── Resolve-only functions ─────────────────────────────────────
-    RESOLVE_FUNC(CUtlBufferEnsureCapacity,     void*, CUtlBuffer*, int);
+    RESOLVE_FUNC(CUtlBufferEnsureCapacity, void*, CUtlBuffer* pCUtlBuffer, uint32 newCapacity);
 
     // ── VEH-captured functions (one-shot int3) ───────────────────────────────
     // On int3 hit, ctx->Rcx is stored to the named output variable.
@@ -141,15 +141,16 @@ namespace Hooks_Misc {
         return GetAppIDForCurrentPipeWrap();
     }
     
-    bool EnsureBufferSize(CUtlBuffer* pWrite, int32 size)
+    bool EnsureBufferCapacity(CUtlBuffer* pWrite, uint32 newCapacity,bool updatePut)
     {
         if (oCUtlBufferEnsureCapacity) {
             LOG_MISC_DEBUG("Before ensuring CUtlBuffer capacity: {}", pWrite->DebugString());
-            oCUtlBufferEnsureCapacity(pWrite, size);
+            oCUtlBufferEnsureCapacity(pWrite, newCapacity);
             LOG_MISC_DEBUG("After ensuring CUtlBuffer capacity: {}", pWrite->DebugString());
+            if(updatePut) pWrite->m_Put = newCapacity;
             return true;
         }
-        LOG_MISC_WARN("EnsureBufferSize: oCUtlBufferEnsureCapacity not resolved");
+        LOG_MISC_WARN("EnsureBufferCapacity: oCUtlBufferEnsureCapacity not resolved");
         return false;
     }
 

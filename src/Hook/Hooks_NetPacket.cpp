@@ -1,10 +1,10 @@
 #include "Hooks_NetPacket.h"
+#include "Utils/ManifestClient.h"
 #include "Hooks_Misc.h"
 #include "HookMacros.h"
 #include "dllmain.h"
 #include "Utils/AppTicket.h"
 #include "Utils/Hash.h"
-#include "Utils/ManifestClient.h"
 #include <chrono>
 #include <future>
 #include <unordered_map>

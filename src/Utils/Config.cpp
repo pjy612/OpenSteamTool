@@ -56,18 +56,14 @@ namespace Config {
                 }
             }
 
-            // [pattern]
-            if (auto pattern = tbl["pattern"].as_table()) {
-                if (auto val = (*pattern)["mirror"].value<std::string>()) {
-                    patternMirror = *val;
-                    // Strip a trailing slash so PatternLoader can append
-                    // "/<subdir>/<sha>.toml" without producing "//".
-                    while (!patternMirror.empty() && patternMirror.back() == '/')
-                        patternMirror.pop_back();
+            // [remote]
+            if (auto remote = tbl["remote"].as_table()) {
+                if (auto val = (*remote)["url_template"].value<std::string>()) {
+                    remoteUrlTemplate = *val;
                 }
             }
 
-            LOG_INFO("Config loaded: manifest.url={} log.level={} lua.paths={} pattern.mirror={}",
+            LOG_INFO("Config loaded: manifest.url={} log.level={} lua.paths={} remote.url_template={}",
                      ManifestClient::ActiveProviderName(),
                      [&](){
                          switch (logLevel) {
@@ -80,7 +76,7 @@ namespace Config {
                          }
                      }(),
                      (uint32_t)luaPaths.size(),
-                     patternMirror.empty() ? "<default>" : patternMirror);
+                     remoteUrlTemplate.empty() ? "<default>" : remoteUrlTemplate);
 
         } catch (const toml::parse_error& e) {
             LOG_WARN("Config parse error: {}", e.what());
